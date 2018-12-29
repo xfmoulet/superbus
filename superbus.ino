@@ -15,6 +15,7 @@
 #define SCREEN_HEIGHT 64 // OLED display height, in pixels
 
 #include "secret.h" // SSID, APPWD, APIKEY
+#include "gfx.c" // include directly as C 
 
 #define USE_SERIAL Serial
 
@@ -39,7 +40,7 @@ ESP8266WiFiMulti WiFiMulti;
 void setup() {
   pinMode(LED_BUILTIN, OUTPUT);
 
-  USE_SERIAL.begin(115200);
+  USE_SERIAL.begin(9600);
   // USE_SERIAL.setDebugOutput(true);
 
   USE_SERIAL.println();
@@ -59,12 +60,8 @@ void setup() {
     Serial.println(F("SSD1306 allocation failed"));
     for(;;); // Don't proceed, loop forever
   }
-
+  delay(100);
   // init display
-  display.clearDisplay();
-  display.setTextSize(1);             // Normal 1:1 pixel scale
-  display.setTextColor(WHITE);        // Draw white text
-  display.setCursor(0,0);             // Start at top-left corner
 
 }
 
@@ -76,8 +73,41 @@ int time2min(const char *timestr)
   
 }
 
+void blink_leds(int n)
+{
+  // blink LED N times
+  for (int i=0;i<n;i++) {
+      digitalWrite(LED_BUILTIN, HIGH);
+      delay(250);
+      digitalWrite(LED_BUILTIN, LOW);   // Turn the LED on 
+      delay(100);
+  }
+  digitalWrite(LED_BUILTIN, HIGH); // Off
+}
+
+void disp_intro(void) {
+    USE_SERIAL.println("pre Xbitmap");
+
+    for (int i=-20;i<0;i+=2) {
+      display.clearDisplay();     // no logo !
+      display.drawXBitmap(i, 0,superbus_bits, superbus_width, superbus_height,WHITE);
+      display.display();
+      delay(100);
+    }
+    USE_SERIAL.println("post Xbitmap");
+    delay(500);
+
+    display.clearDisplay();
+    display.setTextSize(1);             // Normal 1:1 pixel scale
+    display.setTextColor(WHITE);        // Draw white text
+    display.setCursor(0,0);             // Start at top-left corner
+}
+
+
 
 void loop() {
+  disp_intro();
+  
   // wait for WiFi connection
   if ((WiFiMulti.run() == WL_CONNECTED)) {
 
@@ -113,10 +143,17 @@ void loop() {
 
         // TODO : check minimum positive / 2 minimums, variable number
         int next=999999; // minutes til the next one. must be positive.
-        for (int rec_id=0;rec_id<json["records"].size();rec_id++)
+
+        //  header : logo, heure, page
+        display.println(F("C2 Haut sance [HH:MM]"));
+        display.println(F(" ---"));
+        
+        
+        int rec_id;
+        for (rec_id=0;rec_id<json["records"].size();rec_id++)
         {
         
-          JsonObject& rec0 = json["records"][rec_id];
+          JsonObject& rec0 = json["records"][rec_id]; // heure, diffmin
           
           // heures premiere arrivée
           const char* depart    = rec0["fields"]["depart"]; // "2018-09-22T01:13:00+02:00"
@@ -125,25 +162,18 @@ void loop() {
           if (mins>0 && mins < next)
             next = mins;
           
-          USE_SERIAL.print("heure:  ");    USE_SERIAL.println(timestamp);
-          USE_SERIAL.print("depart: ");    USE_SERIAL.println(depart);
-          USE_SERIAL.print("diffmin:");    USE_SERIAL.println(mins);
-          USE_SERIAL.print("next:   ");    USE_SERIAL.println(next);
+          display.print("heure:  ");    display.println(timestamp);
+          display.print("depart: ");    display.println(depart);
+          display.print("diffmin:");    display.println(mins);
+          display.print("next:   ");    display.println(next);
         }
-
-        // blink LED N times
-        for (int i=0;i<next;i++) {
-            digitalWrite(LED_BUILTIN, HIGH);
-            delay(250);
-            digitalWrite(LED_BUILTIN, LOW);   // Turn the LED on 
-            delay(100);
+        
+        if (!rec_id) {
+          display.println("\nPas de bus\npour l'instant :(");
         }
-        digitalWrite(LED_BUILTIN, HIGH); // Off
-
-        display.println(F("Prochain bus dans"));
-        display.println(next);
-        display.println(F("minutes !"));
+        
         display.display();
+
 
         delay(2000); // 
       }
