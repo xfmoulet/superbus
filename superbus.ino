@@ -175,7 +175,7 @@ void loop() {
         display.display();
 
 
-        delay(2000); // 
+        delay(4000); // 
       }
     } else {
       USE_SERIAL.printf("[HTTP] GET... failed, error: %s\n", http.errorToString(httpCode).c_str());
@@ -183,7 +183,9 @@ void loop() {
 
     http.end();
     USE_SERIAL.println("Dodo ! Please reset now.");
+    display.ssd1306_command(SSD1306_DISPLAYOFF); // display Off
     ESP.deepSleep(0);
   }
-  delay(100); // wait cnx ...
+  delay(100); 
+  
 }
