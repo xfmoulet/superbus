@@ -11,6 +11,11 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 
+// STAR search parameters 
+#define IDLIGNE "0002"
+#define SENSLIGNE "0"
+#define ARRETLIGNE "1043"
+
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
 #define SCREEN_HEIGHT 64 // OLED display height, in pixels
 
@@ -32,7 +37,7 @@ Adafruit_SSD1306 display(
   OLED_MOSI, OLED_CLK, OLED_DC, OLED_RESET, OLED_CS
   );
   
-const int DEBUG=0;
+const int DEBUG=1;
 
 ESP8266WiFiMulti WiFiMulti;
 
@@ -68,9 +73,8 @@ void setup() {
 int time2min(const char *timestr)
 {
   // 2018-09-22T01:13:00+02:00
-  // no need to keep constants such as '0' or timezones
-  return 60*(timestr[11]*10+timestr[12])+10*timestr  [14]+timestr  [15];
-  
+  // no need to keep constants such as '0' or timezones since we're doing a diff
+  return 60*(timestr[11]*10+timestr[12])+10*timestr[14]+timestr[15];
 }
 
 void blink_leds(int n)
@@ -120,7 +124,7 @@ void loop() {
     http.begin(
       "http://data.explore.star.fr/api/records/1.0/search/"
       "?dataset=tco-bus-circulation-passages-tr&rows=3&sort=-depart&facet=precision"
-      "&refine.idligne=0002&refine.sens=0&refine.idarret=1043" // C2 saint martin dir haut sancé 
+      "&refine.idligne=" IDLIGNE "&refine.sens=" SENSLIGNE "&refine.idarret=" ARRETLIGNE // C2 saint martin dir haut sancé 
       "&timezone=Europe%2FParis&apikey=" APIKEY
       );
     USE_SERIAL.print("[HTTP] GET...\n");
@@ -141,13 +145,9 @@ void loop() {
         if (DEBUG) USE_SERIAL.println(json["nhits"].as<int>());
         USE_SERIAL.println("found records: "); USE_SERIAL.println(json["records"].size());
 
-        // TODO : check minimum positive / 2 minimums, variable number
-        int next=999999; // minutes til the next one. must be positive.
-
         //  header : logo, heure, page
         display.println(F("C2 Haut sance [HH:MM]"));
         display.println(F(" ---"));
-        
         
         int rec_id;
         for (rec_id=0;rec_id<json["records"].size();rec_id++)
@@ -159,13 +159,10 @@ void loop() {
           const char* depart    = rec0["fields"]["depart"]; // "2018-09-22T01:13:00+02:00"
           const char* timestamp = rec0["record_timestamp"]; // "2018-09-21T23:59:00+02:00"
           int mins = time2min(depart)-time2min(timestamp);
-          if (mins>0 && mins < next)
-            next = mins;
           
-          display.print("heure:  ");    display.println(timestamp);
-          display.print("depart: ");    display.println(depart);
+          display.print("heure:  ");    display.println(timestamp+11);
+          display.print("depart: ");    display.println(depart+11);
           display.print("diffmin:");    display.println(mins);
-          display.print("next:   ");    display.println(next);
         }
         
         if (!rec_id) {
@@ -175,7 +172,7 @@ void loop() {
         display.display();
 
 
-        delay(4000); // 
+        delay(4000); // let time to show results
       }
     } else {
       USE_SERIAL.printf("[HTTP] GET... failed, error: %s\n", http.errorToString(httpCode).c_str());
