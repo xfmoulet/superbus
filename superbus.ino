@@ -15,8 +15,7 @@
 #include <Adafruit_SSD1306.h>
 
 #include "secret.h" // afin de ne pas avoir dans le code mes infos perso wifi et compte Star SSID, APPWD, APIKEY. A mettre dans le meme repertoire que le code
-#include "BusStar.h" // Liste des bus que je veux recuperer
-#include "gfx.c" // include directly as C
+#include "gfx.c" // image, include directly as C
 
 #define USE_SERIAL Serial
 
@@ -32,14 +31,15 @@
 
 // initialisation de l'afficheur
 Adafruit_SSD1306 display(
-    SCREEN_WIDTH, SCREEN_HEIGHT,
+    SCREEN_WIDTH, SCREEN_HEIGHT, // screen size
     OLED_MOSI, OLED_CLK, OLED_DC, OLED_RESET, OLED_CS
 );
 
 const int DEBUG=0;
+unsigned int card_id=0; // card identifier based on MAC NIC 
+
 int rec_id;
 int mins;
-//void setRotation(uint8_t rotation);
 
 ESP8266WiFiMulti WiFiMulti;
 WiFiUDP ntpUDP;
@@ -58,7 +58,7 @@ void connect_wifi()    // Connexion au wifi
 
 }
 
-void wait_for_wifi()
+int wait_for_wifi() // returns card_id from mac
 {
     int i = 0;
     int y = -30;
@@ -69,14 +69,21 @@ void wait_for_wifi()
         USE_SERIAL.print(++i);
         USE_SERIAL.print('.');
         disp_intro(y,z);
-        //     delay(500); Le delai d'attente est remplacé par l'affichage du bus
-
     }
+
+    // get mac, card_id
+    unsigned char mac[6];
+    WiFi.macAddress(mac); // fill in mac address
+    card_id = mac[3]<<16|mac[4]<<8|mac[5];  // mac address is 3 bytes OUI, 3 bytes NIC.
 
     USE_SERIAL.print("Connected to ");
     USE_SERIAL.println(WiFi.SSID());
     USE_SERIAL.print("IP address:\t");
     USE_SERIAL.println(WiFi.localIP()); // utile pour recuperer l'IP et la rendre fixe sur notre Livebox
+    USE_SERIAL.print("Adresse MAC :");
+    for (int i=0;i<5;i++) 
+        USE_SERIAL.printf("%X:",mac[i]);
+    USE_SERIAL.printf("%X (id: 0x%X)\n",mac[5], card_id);
 }
 
 void init_display()
@@ -93,17 +100,15 @@ void init_display()
 
 //**********************************
 
-void disp_intro(int j, int k) {     // Dessine le petit bus
-    USE_SERIAL.println("pre Xbitmap");
+void disp_intro(int j, int k) {     // Dessine le petit bus 
 
     for (int i=j; i<k; i+=2) {
-        display.clearDisplay();     // no logo !
+        display.clearDisplay();
         display.drawXBitmap(i, 0,superbus_bits, superbus_width, superbus_height,WHITE);
         display.display();
         delay(100);
     }
 
-    USE_SERIAL.println("post Xbitmap");
     delay(500);
 
     display.clearDisplay();
@@ -112,14 +117,14 @@ void disp_intro(int j, int k) {     // Dessine le petit bus
     display.setCursor(0,0);             // Start at top-left corner
 }
 
-#define BUFSIZE 1000
-char buffer[BUFSIZE];
+#define BUFSIZE 512
+char url_buffer[BUFSIZE];
 
-void get_bus(char *title, int rows,char *idligne,char *idarret ) {
+void get_bus(int x, int y, int rows,char *idligne,char *idarret ) {
 
-    display.setCursor(0,0);
+    display.setCursor(x,y);
     display.setTextSize(1);
-    display.println(title);
+    // display.println(title);
     USE_SERIAL.println(idligne);
     HTTPClient http;
 
@@ -129,13 +134,13 @@ void get_bus(char *title, int rows,char *idligne,char *idarret ) {
 
     // definir l'url
 
-    snprintf(buffer,BUFSIZE, "http://data.explore.star.fr/api/records/1.0/search/"
+    snprintf(url_buffer,BUFSIZE, "http://data.explore.star.fr/api/records/1.0/search/"
              "?dataset=tco-bus-circulation-passages-tr&rows=%d"
              "&sort=-depart&facet=precision&refine.idligne=%s"
              "&refine.idarret=%s"
              "&timezone=Europe%%2FParis&apikey=%s",rows,idligne,idarret,APIKEY );
 
-    http.begin(buffer);
+    http.begin(url_buffer);
 
 
     USE_SERIAL.println("[HTTP] GET...\n");
@@ -167,7 +172,7 @@ void get_bus(char *title, int rows,char *idligne,char *idarret ) {
             {
                 JsonObject& rec0 = json["records"][rec_id];
 
-                // munites resstantes avant bus
+                // minutes restantes avant bus
                 const char* depart    = rec0["fields"]["depart"]; // "2018-09-22T01:13:00+02:00"
                 int dep = ((((depart[11]-48)*10) + (depart[12]-48))*60) + ((depart[14]-48)*10) + (depart[15]-48); // -48 pour passage code ascii en chiffre
                 int tstamp = (timeClient.getHours()*60)+ timeClient.getMinutes();
@@ -178,400 +183,50 @@ void get_bus(char *title, int rows,char *idligne,char *idarret ) {
                 if (mins <= 0 )
                     mins = 0;
                 USE_SERIAL.println(mins);
-                display.print("     ");
+                display.setCursor(x,y);
                 display.print(mins);
-                display.println("  minutes");
-                display.display();
+                display.println(" min.");
+                y += 8;
             }
             if (!rec_id) {
-                display.println("\nPas de bus\npour l'instant");
-                display.display();
+                display.setCursor(x,y);
+                display.println("--");
+                y += 8;
             }
-            delay(500); //
-        }
-    }
-}
-
-void diplay_type (int type) {
-    USE_SERIAL.println(type);
-
-    if (type == 7 ) {
-        for (int x = 0; x<5; x++) {
-            timeClient.update();
-            display.clearDisplay();
-            display.setCursor(10,25);
-            display.setTextSize(2);
-            // display.print(" il est ");
-            display.println(timeClient.getFormattedTime());
+            // send to display now
             display.display();
-            delay (1000);
         }
-    } else if (type == 8 ) {
-        for (int x = 0; x<5; x++) {
-            timeClient.update();
-            display.clearDisplay();
-            display.setCursor(10,25);
-            display.setTextSize(2);
-            // display.print(" il est ");
-            display.println(timeClient.getFormattedTime());
-            display.setCursor(0,45);
-            display.setTextSize(1);
-            display.print(F("Appuyer sur le bouton "));
-            display.print(" pour rafraichir");
-            display.display();
-            display.display();
-            delay (1000);
-        }
-    }
-
-
-    /*  swtich (type) {
-        case 1:
-           USE_SERIAL.println("1");
-           break;
-        case 2:
-           USE_SERIAL.println("2");
-           break;
-        case 3:
-           USE_SERIAL.println("3");
-           break;
-        case 4:
-           USE_SERIAL.println("4");
-           break;
-        case 5:
-           USE_SERIAL.println("5");
-           break;
-        case 6:
-           USE_SERIAL.println("6");
-           break;
-        case 7:
-           USE_SERIAL.println("7");
-           break;
-      } */
-}
-
-void get_bus2() {
-    display.setCursor(0,35);
-    display.println(F("le 31"));
-
-    HTTPClient http;
-
-    USE_SERIAL.println("[HTTP] begin...\n");
-
-    timeClient.update();
-
-    USE_SERIAL.println(timeClient.getFormattedTime());
-
-    // definir l'url
-    http.begin(
-        "http://data.explore.star.fr/api/records/1.0/search/"
-        "?dataset=tco-bus-circulation-passages-tr&rows=2"
-        "&sort=-depart&facet=precision&refine.idligne=" IDLIGNE2
-        "&refine.idarret=" IDARRET2
-        "&timezone=Europe%2FParis&apikey=" APIKEY
-    );
-
-    USE_SERIAL.println("[HTTP] GET...\n");
-
-    // lancer la requete
-    int httpCode = http.GET();
-
-    // httpCode will be negative on error
-    if (httpCode > 0) {
-        // HTTP header has been send and Server response header has been handled
-        USE_SERIAL.printf("[HTTP] GET... code: %d\n", httpCode);
-        USE_SERIAL.println();
-
-        DynamicJsonBuffer jsonBuffer(5000);
-
-        if (httpCode == HTTP_CODE_OK ) {
-            String payload = http.getString();
-            if (DEBUG) USE_SERIAL.println(payload);
-
-            JsonObject& json = jsonBuffer.parseObject(payload);
-            if (DEBUG) USE_SERIAL.println(json["nhits"].as<int>());
-
-            USE_SERIAL.print("found records: ");
-            USE_SERIAL.println(json["records"].size());
-
-            http.end(); // libere les ressources
-
-            int rec_id;
-            int Ligne = 45;
-            for ( rec_id=0; rec_id<json["records"].size(); rec_id++) {
-                JsonObject& rec0 = json["records"][rec_id];
-
-                // munites resstantes avant bus
-                const char* depart    = rec0["fields"]["depart"]; // "2018-09-22T01:13:00+02:00"
-                int dep = ((((depart[11]-48)*10) + (depart[12]-48))*60) + ((depart[14]-48)*10) + (depart[15]-48); // -48 pour passage code ascii en chiffre
-                int tstamp = (timeClient.getHours()*60)+ timeClient.getMinutes();
-                int mins = dep - tstamp;
-
-
-                // Affichage des infos sur afficheur
-
-                if (mins <= 0 )
-                    mins = 0;
-                USE_SERIAL.println(mins);
-                display.setCursor(3,Ligne);
-                display.print(" ");
-                display.print(mins);
-                display.println(" mins");
-                Ligne = Ligne + 8;
-                display.display();
-            }
-            if (!rec_id) {
-                display.setCursor(0,45);
-                display.println("Pas de bus\nmaintenant");
-                display.display();
-            }
-            delay(500); //
-        }
+    } else {
+        USE_SERIAL.printf("[HTTP] GET... failed, error: %s\n", http.errorToString(httpCode).c_str());
+        display.println(F("Problème de connexion au serveur"));
+        display.display();
     }
 }
 
-void get_bus3() {
-    display.setCursor(70,35);
-    display.println(F("le 207"));
-
-    HTTPClient http;
-
-    USE_SERIAL.println("[HTTP] begin...\n");
-
-    timeClient.update();
-
-    USE_SERIAL.println(timeClient.getFormattedTime());
-
-    // definir l'url
-    http.begin(
-        "http://data.explore.star.fr/api/records/1.0/search/"
-        "?dataset=tco-bus-circulation-passages-tr&rows=2"
-        "&sort=-depart&facet=precision&refine.idligne=" IDLIGNE3
-        "&refine.idarret=" IDARRET3
-        "&timezone=Europe%2FParis&apikey=" APIKEY
-    );
-
-    USE_SERIAL.println("[HTTP] GET...\n");
-
-    // lancer la requete
-    int httpCode = http.GET();
-
-    // httpCode will be negative on error
-    if (httpCode > 0) {
-        USE_SERIAL.printf("[HTTP] GET... code: %d\n", httpCode);
-        USE_SERIAL.println();
-
-        DynamicJsonBuffer jsonBuffer(5000);
-
-        if (httpCode == HTTP_CODE_OK ) {
-            String payload = http.getString();
-            if (DEBUG) USE_SERIAL.println(payload);
-
-            JsonObject& json = jsonBuffer.parseObject(payload);
-            if (DEBUG) USE_SERIAL.println(json["nhits"].as<int>());
-
-            USE_SERIAL.print("found records: ");
-            USE_SERIAL.println(json["records"].size());
-
-            http.end(); // libere les ressources
-
-            int rec_id;
-            int Ligne = 45;
-            for ( rec_id=0; rec_id<json["records"].size(); rec_id++)
-            {
-                JsonObject& rec0 = json["records"][rec_id];
-
-                // munites resstantes avant bus
-                const char* depart    = rec0["fields"]["depart"]; // "2018-09-22T01:13:00+02:00"
-                int dep = ((((depart[11]-48)*10) + (depart[12]-48))*60) + ((depart[14]-48)*10) + (depart[15]-48); // -48 pour passage code ascii en chiffre
-                int tstamp = (timeClient.getHours()*60)+ timeClient.getMinutes();
-                int mins = dep - tstamp;
-
-                // Affichage des infos sur afficheur
-
-                if (mins <= 0 )
-                    mins = 0;
-                USE_SERIAL.println(mins);
-                display.setCursor(64,Ligne);
-                display.print(" ");
-                display.print(mins);
-                display.println(" mins");
-                Ligne = Ligne + 8;
-                display.display();
-            }
-            if (!rec_id) {
-                display.setCursor(64,45);
-                display.println("Pas de bus");
-                display.setCursor(64,53);
-                display.println("maintenant");
-                display.display();
-            }
-            delay(500); //
+void display_time () {
+    for (int x = 0; x<10; x++) {
+        timeClient.update();
+        display.clearDisplay();
+        display.setCursor(10,25);
+        display.setTextSize(2);
+        // display.print(" il est ");
+        display.println(timeClient.getFormattedTime());
+        if (x>5) {
+          display.setTextSize(1);
+          display.print(F("Appuyer sur le bouton "));
+          display.print(" pour rafraichir");
         }
+        display.display();
+        delay (1000);
     }
 }
-
-void get_bus4() {
-    display.setCursor(0,16);
-    display.println(F(" le C6"));
-    HTTPClient http;
-
-    USE_SERIAL.println("[HTTP] begin...\n");
-
-    timeClient.update();
-
-
-    // definir l'url
-    http.begin(
-        "http://data.explore.star.fr/api/records/1.0/search/"
-        "?dataset=tco-bus-circulation-passages-tr&rows=" ROW
-        "&sort=-depart&facet=precision&refine.idligne=" IDLIGNE4
-        "&refine.idarret=" IDARRET4
-        "&timezone=Europe%2FParis&apikey=" APIKEY
-    );
-
-    USE_SERIAL.println("[HTTP] GET...\n");
-
-    // lancer la requete
-    int httpCode = http.GET();
-
-    // httpCode will be negative on error
-    if (httpCode > 0) {
-        // HTTP header has been send and Server response header has been handled
-        USE_SERIAL.printf("[HTTP] GET... code: %d\n", httpCode);
-        USE_SERIAL.println();
-
-        DynamicJsonBuffer jsonBuffer(5000);
-
-        if (httpCode == HTTP_CODE_OK ) {
-            String payload = http.getString();
-            if (DEBUG) USE_SERIAL.println(payload);
-
-            JsonObject& json = jsonBuffer.parseObject(payload);
-            if (DEBUG) USE_SERIAL.println(json["nhits"].as<int>());
-
-            USE_SERIAL.print("found records: ");
-            USE_SERIAL.println(json["records"].size());
-
-            http.end(); // libere les ressources
-
-            int rec_id;
-            int Ligne = 25;
-            for ( rec_id=0; rec_id<json["records"].size(); rec_id++)
-            {
-                JsonObject& rec0 = json["records"][rec_id];
-
-                // munites resstantes avant bus
-                const char* depart    = rec0["fields"]["depart"]; // "2018-09-22T01:13:00+02:00"
-                int dep = ((((depart[11]-48)*10) + (depart[12]-48))*60) + ((depart[14]-48)*10) + (depart[15]-48); // -48 pour passage code ascii en chiffre
-                int tstamp = (timeClient.getHours()*60)+ timeClient.getMinutes();
-                int mins = dep - tstamp;
-
-
-                // Affichage des infos sur afficheur
-
-                if (mins <= 0 )
-                    mins = 0;
-                USE_SERIAL.println(mins);
-                display.setCursor(3,Ligne);
-                display.print(" ");
-                display.print(mins);
-                display.println(" mins");
-                Ligne = Ligne + 8;
-                display.display();
-            }
-            if (!rec_id) {
-                display.setCursor(0,25);
-                display.println("Pas de bus\nmaintenant");
-                display.display();
-            }
-            delay(500); //
-        }
-    }
-}
-void get_bus5() {
-    display.setCursor(64,16);
-    display.println(F(" le 67"));
-    HTTPClient http;
-
-    USE_SERIAL.println("[HTTP] begin...\n");
-
-    timeClient.update();
-
-
-    // definir l'url
-    http.begin(
-        "http://data.explore.star.fr/api/records/1.0/search/"
-        "?dataset=tco-bus-circulation-passages-tr&rows=" ROW
-        "&sort=-depart&facet=precision&refine.idligne=" IDLIGNE5
-        "&refine.idarret=" IDARRET5
-        "&timezone=Europe%2FParis&apikey=" APIKEY
-    );
-
-    USE_SERIAL.println("[HTTP] GET...\n");
-
-    // lancer la requete
-    int httpCode = http.GET();
-
-    // httpCode will be negative on error
-    if (httpCode > 0) {
-        // HTTP header has been send and Server response header has been handled
-        USE_SERIAL.printf("[HTTP] GET... code: %d\n", httpCode);
-        USE_SERIAL.println();
-
-        DynamicJsonBuffer jsonBuffer(5000);
-
-        if (httpCode == HTTP_CODE_OK ) {
-            String payload = http.getString();
-            if (DEBUG) USE_SERIAL.println(payload);
-
-            JsonObject& json = jsonBuffer.parseObject(payload);
-            if (DEBUG) USE_SERIAL.println(json["nhits"].as<int>());
-
-            USE_SERIAL.print("found records: ");
-            USE_SERIAL.println(json["records"].size());
-
-            http.end(); // libere les ressources
-
-            int rec_id;
-            int Ligne = 25;
-            for ( rec_id=0; rec_id<json["records"].size(); rec_id++)
-            {
-                JsonObject& rec0 = json["records"][rec_id];
-
-                // munites resstantes avant bus
-                const char* depart    = rec0["fields"]["depart"]; // "2018-09-22T01:13:00+02:00"
-                int dep = ((((depart[11]-48)*10) + (depart[12]-48))*60) + ((depart[14]-48)*10) + (depart[15]-48); // -48 pour passage code ascii en chiffre
-                int tstamp = (timeClient.getHours()*60)+ timeClient.getMinutes();
-                int mins = dep - tstamp;
-
-
-                // Affichage des infos sur afficheur
-
-                if (mins <= 0 )
-                    mins = 0;
-                USE_SERIAL.println(mins);
-                display.setCursor(64,Ligne);
-                display.print(" ");
-                display.print(mins);
-                display.println(" mins");
-                Ligne = Ligne + 8;
-                display.display();
-            }
-            if (!rec_id) {
-                display.setCursor(64,25);
-                display.print("Pas de bus");
-                display.setCursor(64,33);
-                display.print("maintenant");
-                display.display();
-            }
-            delay(500); //
-        }
-    }
+void sleep() {
+    // on eteint tout maintenant
+    USE_SERIAL.println("Dodo ! Please reset now.");
+    display.ssd1306_command(SSD1306_DISPLAYOFF); // display Off
+    ESP.deepSleep(0);
 }
 
-
-//*******************************
 void setup() {
 
     USE_SERIAL.begin(115200);
@@ -588,54 +243,88 @@ void setup() {
     disp_intro(-40,-20);
     wait_for_wifi();
 
-// recuperation de l'heure NTP
+    // recuperation de l'heure NTP
     timeClient.begin();
 
     digitalWrite(LED_BUILTIN, HIGH); // on eteint la LED
 }
-//**********************************
-void loop() {
 
-
-    if ((WiFiMulti.run() == WL_CONNECTED)) {    // Quand la connection wifi est etablie
-
-        // Affichage premiere page
-        display.clearDisplay();
-        get_bus("prochain bus C6 dans",3,IDLIGNE1,IDARRET1);
-        get_bus2();
-        get_bus3();
-        delay(10000);
-
-        // Affichage page 2
-        display.clearDisplay();
-        display.setCursor(0,0);
-        display.println(F("   Vers Republique "));
-        get_bus4();
-        get_bus5();
-        display.display();
-        delay(10000);
-
-    }  else delay(100); // wait cnx ...
-
-    /* else {
-          USE_SERIAL.printf("[HTTP] GET... failed, error: %s\n", http.errorToString(httpCode).c_str());
-            display.println(F("Problème de connexion au serveur"));
-            display.display();
-          }  */
-
-//  display.clearDisplay();
-    diplay_type (7);
-    diplay_type (8);
-
-
-    // on eteint tout
-    USE_SERIAL.println("Dodo ! Please reset now.");
-    display.ssd1306_command(SSD1306_DISPLAYOFF); // display Off
-    ESP.deepSleep(0);
+void affiche_fred() {
+    // Affichage premiere page
+    display.clearDisplay();
+    display.println(F("prochain bus C6 dans\n\n\n le 31      le 207"));
+    get_bus( 0, 8, 3, "0002", "1043");
+    
+    get_bus( 0,43, 2, "0002", "1043");
+    get_bus(64,43, 2, "0002", "1043");
+    delay(10000);
+  
+    // Affichage page 2
+    display.clearDisplay();
+    display.setCursor(0,0);
+    display.println(F("   Vers Republique "));    
+    display.println(F("  le C6        le 67"));    
+    
+    get_bus( 0,16, 3, "0002", "1043");
+    get_bus(64,16, 3, "0002", "1043");
+    delay(10000);
+    
+    display_time();
 }
 
+void minitime() {
+  display.setCursor(80,0);
+  display.fillRect(80,0,128,8,0);// clear 
+  display.println(timeClient.getFormattedTime());
+  display.display();
+}
 
+void affiche_xav() {
+    display.clearDisplay();
+    display.setCursor(0,0);
+    display.setTextColor(0,1); // inverse
+    display.print(F("HorlogeoBus\n"));     
+    display.setTextColor(1,0); // normal
+    display.println(F("  vers Repu  StGreg"));
+    display.println(F("C2:\n\n\n12:"));
+    display.drawLine(72,20,72,48,1);
+    
+    get_bus(20, 16, 3, "0002", "1043");
+    get_bus(20, 42, 3, "0012", "1043");
+    get_bus(78, 16, 3, "0002", "1099");
+    get_bus(78, 42, 3, "0012", "1099");
+    
+    for (int i=0;i<15;i++) {
+      minitime();
+      delay(1000); // update time      
+    }
+    
+    // end splash    
+    display.fillRect(16,20,96,38,0);
+    display.drawRect(16,20,96,38,1);
+    
+    display.setCursor(20,24); display.print("Appuyer sur le");
+    display.setCursor(20,32); display.print(" Bouton  pour");
+    display.setCursor(20,40); display.print("  rafraichir");
 
+    display.display();
+    
+    for (int i=0;i<4;i++) {
+      minitime();
+      delay(1000); // update time      
+    }
 
+}
 
-
+void loop() {
+    if ((WiFiMulti.run() == WL_CONNECTED)) {    // Quand la connection wifi est etablie
+      if ( card_id == 0x4517f3 )
+        affiche_xav();
+      else 
+        affiche_fred();
+      sleep();
+        
+    } else {
+      delay(100); // wait cnx ...
+    }
+}
